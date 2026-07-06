@@ -1,0 +1,4 @@
+paho-mqtt>=2.1
+matplotlib>=3.8
+# 3D visualizer only (local machine with display):
+# ursina>=7.0

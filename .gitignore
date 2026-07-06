@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+results/_partial.json
+results/run*.log
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/page*.png
+paper/hires*.png
+paper/fig_crop.png
+.idea/
+venv/
