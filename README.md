@@ -1,4 +1,4 @@
-# Mission-DT — Reproducible artifact (SBESC 2026)
+# Mission-DT — Reproducible artifact
 
 Mission-level Digital Twin for hybrid fleets (physical + virtual, aerial + surface).
 All numbers in the paper come from `results/*.json` (raw measurements included).

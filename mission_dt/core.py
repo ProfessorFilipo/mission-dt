@@ -68,8 +68,12 @@ class MissionDT:
     Collects per-frame and per-message metrics.
     """
 
-    def __init__(self, host="127.0.0.1", frame_ms=FRAME_MS, viz_hook=None):
+    def __init__(self, host="127.0.0.1", frame_ms=FRAME_MS, viz_hook=None,
+                 swarm=False, sep_m=12.0):
         self.frame_s = frame_ms / 1000.0
+        self.swarm = swarm          # enable inter-agent separation (phi context)
+        self.sep_m = sep_m          # separation threshold (meters)
+        self.avoid_events = 0       # frames in which avoidance overrode lambda
         self.agents: dict[str, AgentRecord] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -160,6 +164,28 @@ class MissionDT:
             act["climb"] = max(-1.0, min(1.0, (g[2] - s.alt) / 5.0))
         return act
 
+
+    # ------------------------------------------------------------------
+    # phi + swarm rule : mission context (inter-agent distances) feeding
+    # a separation behavior. Returns (neighbor, dist, away_bearing) when
+    # the nearest same-domain neighbor is within sep_m, else None.
+    # ------------------------------------------------------------------
+    def _separation(self, rec: AgentRecord, agents: list):
+        best, bd, bdx, bdy = None, 1e12, 0.0, 0.0
+        for other in agents:
+            if other is rec or other.domain != rec.domain:
+                continue
+            dy = (other.state.lat - rec.state.lat) * 111_320.0
+            dx = (other.state.lon - rec.state.lon) * 111_320.0 * \
+                math.cos(math.radians(rec.state.lat))
+            d = math.hypot(dx, dy)
+            if d < bd:
+                best, bd, bdx, bdy = other, d, dx, dy
+        if best is not None and bd < self.sep_m:
+            away = math.atan2(-bdx, -bdy)   # bearing pointing away from neighbor
+            return best, bd, away
+        return None
+
     # ------------------------------------------------------------------
     def run(self, duration_s: float, goals: dict | None = None):
         """Main DT loop: one Delta^e evaluation per frame for the mission."""
@@ -174,7 +200,19 @@ class MissionDT:
                 if goals and rec.agent_id in goals:
                     rec.goal = goals[rec.agent_id]
                 self._delta(rec, pending.get(rec.agent_id, []))
+            for rec in agents:
                 act = self._lambda(rec)
+                if self.swarm:
+                    hit = self._separation(rec, agents)
+                    if hit is not None:
+                        nb, dist, away = hit
+                        err = (away - rec.state.yaw + math.pi) % (2 * math.pi) - math.pi
+                        act["alpha"] = max(-1.0, min(1.0, 1.5 * err))
+                        act["tau"] = min(act["tau"], 0.5)
+                        act["avoid"] = True
+                        act["trig_t"] = nb.state.t     # neighbor telemetry timestamp
+                        act["trig_id"] = nb.agent_id
+                        self.avoid_events += 1
                 self.cli.publish(f"missiondt/agents/{rec.agent_id}/actuation",
                                  json.dumps(act), qos=0)
             if self.viz_hook:

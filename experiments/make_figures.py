@@ -49,3 +49,24 @@ for a in axs:
     a.margins(y=0.18)
 fig.tight_layout();fig.savefig(f"{R}/fig_regulator.pdf");fig.savefig(f"{R}/fig_regulator.png")
 print("figures ok")
+
+# Fig D: E3 swarm propagation latency CDF
+import os, pathlib
+_R = str(pathlib.Path(__file__).resolve().parent.parent/"results")
+if os.path.exists(f"{_R}/e3_swarm.json"):
+    e3=json.load(open(f"{_R}/e3_swarm.json"))
+    fig,ax=plt.subplots(figsize=(3.45,2.1))
+    styles=[("-","#16243F"),("--","#C9A24A"),(":","#8a1f1f")]
+    import numpy as np
+    for r,(ls,c) in zip(e3,styles):
+        v=np.sort(np.array(r["raw_swarm_lat_ms"]))
+        y=np.arange(1,len(v)+1)/len(v)
+        ax.plot(v,y,ls,color=c,lw=1.3,label=f"N={r['n_agents']} ({r['swarm_lat_ms']['n']} events)")
+    ax.axvline(250,color="k",lw=0.8,ls="-.")
+    ax.text(252,0.08,"2-frame bound\n(250 ms)",fontsize=6.5)
+    ax.set_xlabel("Swarm-reaction propagation latency (ms)")
+    ax.set_ylabel("CDF"); ax.set_xlim(0,290); ax.set_ylim(0,1.02)
+    ax.legend(frameon=False,fontsize=7,loc="center right")
+    fig.tight_layout()
+    fig.savefig(f"{_R}/fig_swarm.pdf"); fig.savefig(f"{_R}/fig_swarm.png")
+    print("fig_swarm ok")

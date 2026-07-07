@@ -42,6 +42,7 @@ class VirtualAgent(threading.Thread):
         self.bytes_out = 0
         self.msgs_out = 0
         self.act_latencies = []   # DT actuation publish -> agent apply (s)
+        self.swarm_latencies = []  # neighbor telemetry pub -> corrective actuation here (s)
 
         self.cli = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
                                client_id=agent_id, protocol=mqtt.MQTTv5)
@@ -55,7 +56,10 @@ class VirtualAgent(threading.Thread):
     # actuation A_k^t from the Mission-DT (two-way channel: DT -> twin)
     def _on_act(self, cli, ud, msg):
         a = json.loads(msg.payload)
-        self.act_latencies.append(time.time() - a["t_pub"])
+        now = time.time()
+        self.act_latencies.append(now - a["t_pub"])
+        if a.get("avoid") and a.get("trig_t"):
+            self.swarm_latencies.append(now - a["trig_t"])
         self.tau, self.alpha = a["tau"], a["alpha"]
         self.climb = a.get("climb", 0.0)
 
