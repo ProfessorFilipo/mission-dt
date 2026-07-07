@@ -50,7 +50,8 @@ class VirtualAgent(threading.Thread):
         self.cli.connect(host, 1883)
         self.cli.subscribe(f"missiondt/agents/{agent_id}/actuation", qos=0)
         self.cli.publish(f"missiondt/agents/{agent_id}/register",
-                         json.dumps({"domain": domain, "kind": "virtual"}), qos=1)
+                         json.dumps({"domain": domain, "kind": "virtual"}),
+                         qos=1, retain=True)
         self.cli.loop_start()
 
     # actuation A_k^t from the Mission-DT (two-way channel: DT -> twin)
