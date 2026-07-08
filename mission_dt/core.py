@@ -124,8 +124,9 @@ class MissionDT:
         if not telems:
             rec.stale = True
             self.stale_updates += 1
-            # dead-reckon from history (proactive operation, MPC-like)
-            if len(rec.history) >= 2:
+            # dead-reckon from history (proactive operation, MPC-like);
+            # only after the first real telemetry has seeded the state
+            if rec.last_seq >= 0 and len(rec.history) >= 2:
                 b1, b0 = rec.history[-1], rec.history[-2]
                 dt = self.frame_s
                 rec.state.lat += (b1.lat - b0.lat)
@@ -145,7 +146,8 @@ class MissionDT:
             s.battery_v = m["vb"]
             s.t = m["t_pub"]
             rec.stale = False
-        rec.history.append(AgentState(**vars(rec.state)))
+        if rec.last_seq >= 0:
+            rec.history.append(AgentState(**vars(rec.state)))
 
     # ------------------------------------------------------------------
     # lambda : goal-seeking decision function -> A_k^t

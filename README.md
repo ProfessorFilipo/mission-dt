@@ -5,6 +5,11 @@ unmanned vehicles** (aerial + surface), built on MQTT with a lightweight
 Python core, a decoupled 3D mission view, and a live agent panel.
 <br>by Filipo Novo Mór
 
+Companion code for the paper *"Mission-DT: A Mission-Level Digital Twin
+Architecture for Hybrid Fleets of Physical and Virtual Unmanned
+Vehicles"*. All numbers in the paper come
+from `results/*.json` (raw measurements included).
+
 ## Key ideas
 - The **mission** is the twinned entity: `M = <states, transitions, goals, context φ>`.
 - **Hybrid agents**: each agent is a physical vehicle (ArduPilot bridged
@@ -70,6 +75,7 @@ white on approach, orange in conflict, red on near-collision.
 ```bash
 python experiments/run_experiments.py all   # E1 scalability + E2 regulators (~6 min)
 python experiments/run_e3.py                # E3 swarm propagation latency
+python experiments/run_e4.py                # E4 twin fidelity at 0/5/10% loss
 python experiments/make_figures.py          # figures into results/
 ```
 Measured on 1 vCPU (Xeon 2.10 GHz): zero 125 ms frame overruns up to

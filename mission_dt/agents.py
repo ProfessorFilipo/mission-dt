@@ -24,10 +24,13 @@ BASE_LAT, BASE_LON = -30.0577, -51.1729  # Porto Alegre test area
 
 class VirtualAgent(threading.Thread):
     def __init__(self, agent_id, domain="surface", host="127.0.0.1",
-                 regulator=True, duration_s=30.0, jitter=True):
+                 regulator=True, duration_s=30.0, jitter=True, loss=0.0):
         super().__init__(daemon=True)
         self.aid, self.domain = agent_id, domain
         self.regulator = regulator
+        self.loss = loss              # simulated network loss probability
+        self.lost_msgs = 0
+        self.truth_log = []           # (t, lat, lon, yaw) ground truth
         self.duration = duration_s
         self.jitter = jitter
         # physical state (ground truth of the emulated vehicle)
@@ -96,12 +99,17 @@ class VirtualAgent(threading.Thread):
         t_end = t_next + self.duration
         while time.monotonic() < t_end:
             self._step(period)
+            self.truth_log.append((time.time(), self.lat, self.lon, self.yaw))
             if not self.regulator or tick % decim == 0:
                 self.seq += 1
-                p = json.dumps(self._telemetry())
-                self.cli.publish(f"missiondt/agents/{self.aid}/telemetry", p, qos=0)
-                self.bytes_out += len(p)
-                self.msgs_out += 1
+                if self.loss > 0.0 and random.random() < self.loss:
+                    self.lost_msgs += 1          # dropped by the "network"
+                else:
+                    p = json.dumps(self._telemetry())
+                    self.cli.publish(f"missiondt/agents/{self.aid}/telemetry",
+                                     p, qos=0)
+                    self.bytes_out += len(p)
+                    self.msgs_out += 1
             tick += 1
             t_next += period
             s = t_next - time.monotonic()
