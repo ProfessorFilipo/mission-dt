@@ -1,0 +1,9 @@
+{
+  "profile": "orbitas",
+  "drones": { "aerial": 5, "surface": 5 },
+  "radius_m": 45.0,
+  "arrive_m": 3.0,
+  "aerial_alt_m": 15.0,
+  "checkpoints": {},
+  "assignments": {}
+}
