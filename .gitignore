@@ -11,3 +11,6 @@ paper/fig_crop.png
 .idea/
 venv/
 .DS_Store
+/doc/estrutura_slides.txt
+/doc/mission_dt_sbesc2026.pdf
+/doc/mission_dt_sbesc2026.tex
