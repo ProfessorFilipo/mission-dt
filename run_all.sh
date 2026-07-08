@@ -28,6 +28,9 @@ then
     exit 1
 fi
 
+echo "== Clearing retained ghosts from the broker =="
+python experiments/clear_retained.py
+
 echo "== E1 + E2 (scalability + regulators, ~6 min) =="
 python experiments/run_experiments.py
 
