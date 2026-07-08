@@ -175,7 +175,8 @@ class MissionDT:
     def _separation(self, rec: AgentRecord, agents: list):
         best, bd, bdx, bdy = None, 1e12, 0.0, 0.0
         for other in agents:
-            if other is rec or other.domain != rec.domain:
+            if other is rec or other.domain != rec.domain \
+                    or other.last_seq < 0:
                 continue
             dy = (other.state.lat - rec.state.lat) * 111_320.0
             dx = (other.state.lon - rec.state.lon) * 111_320.0 * \
@@ -203,6 +204,8 @@ class MissionDT:
                     rec.goal = goals[rec.agent_id]
                 self._delta(rec, pending.get(rec.agent_id, []))
             for rec in agents:
+                if rec.last_seq < 0:
+                    continue          # never heard from (e.g., stale ghost)
                 act = self._lambda(rec)
                 if self.swarm:
                     hit = self._separation(rec, agents)

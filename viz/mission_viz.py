@@ -178,10 +178,15 @@ def main():
     cli.on_message = on_telemetry
     cli.connect(args.host, 1883)
     cli.subscribe("missiondt/agents/+/telemetry")
-    cli.message_callback_add(
-        "missiondt/agents/+/register",
-        lambda c, u, m: watch.reg(m.topic.split("/")[2],
-                                  json.loads(m.payload)))
+    def on_register(c, u, m):
+        if not m.payload:
+            return                     # deregistration (cleared retained)
+        try:
+            watch.reg(m.topic.split("/")[2], json.loads(m.payload))
+        except json.JSONDecodeError:
+            pass
+
+    cli.message_callback_add("missiondt/agents/+/register", on_register)
     cli.subscribe("missiondt/agents/+/register", qos=1)
     routes_msg, routes_dirty = {}, [False]
 

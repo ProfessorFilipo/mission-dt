@@ -117,5 +117,9 @@ class VirtualAgent(threading.Thread):
                 time.sleep(s)
             else:
                 t_next = time.monotonic()
+        # deregister: clear our retained registration so no ghost remains
+        self.cli.publish(f"missiondt/agents/{self.aid}/register",
+                         payload=b"", qos=1, retain=True)
+        time.sleep(0.1)
         self.cli.loop_stop()
         self.cli.disconnect()
