@@ -23,8 +23,13 @@ fi
 # --- 1) virtual environment (idempotent) ------------------------------
 if [ -f ".venv/bin/activate" ]; then
     source .venv/bin/activate
+elif [ -f ".venv/Scripts/activate" ]; then
+    source .venv/Scripts/activate
+elif [ -n "$VIRTUAL_ENV" ]; then
+    echo "Using already-active virtual environment: $VIRTUAL_ENV"
 else
-    echo "ERROR: .venv not found. Create it first:  python3 -m venv .venv"
+    echo "ERROR: .venv not found and no virtual environment is active."
+    echo "  Create it first:  python3 -m venv .venv"
     exit 1
 fi
 ulimit -n 4096 2>/dev/null || true
@@ -72,5 +77,5 @@ fi
 # --- 5) 3D view in the foreground (ESC quits everything) --------------
 echo "Opening the 3D mission view (ESC to quit)."
 echo "Tip: for the live agent table, run in another terminal:"
-echo "     source .venv/bin/activate && python experiments/panel.py"
+echo "     (activate the venv) && python experiments/panel.py"
 python viz/mission_viz.py
