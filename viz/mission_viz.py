@@ -30,12 +30,17 @@ import threading
 import time as pytime
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
 from panda3d.core import ClockObject
 from ursina import (Ursina, Entity, EditorCamera, Text, Button, Mesh,
-                    color, window, held_keys, application, destroy)
+                    color, window, application, destroy, Grid)
+
+# Add parent directory to path to import water module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from water.water import Water
 
 # reuse the Watch class from the terminal panel (panel.py stays untouched)
 _pp = Path(__file__).resolve().parent.parent / "experiments" / "panel.py"
@@ -219,9 +224,14 @@ def main():
     window.borderless = False          # normal window (fixes macOS cropping)
     window.color = color.rgb(10 / 255, 20 / 255, 40 / 255)
     window.fps_counter.enabled = True
-    Entity(model="plane", scale=600,
-           color=color.rgb(20 / 255, 60 / 255, 90 / 255),
-           texture="white_cube", texture_scale=(120, 120))
+    
+    # Create animated water surface
+    water = Water(scale=600, grid_size=120, use_shader=True)
+    
+    # Add directional lighting for water reflections/shading
+    from ursina import DirectionalLight
+    sun = DirectionalLight(y=20, rotation=(45, 45, 45))
+    sun.intensity = 1.2
     sky = Entity(model="plane", scale=600, y=12, rotation_x=180,
                  color=color.rgb(14 / 255, 35 / 255, 60 / 255),
                  texture="white_cube", texture_scale=(120, 120),
@@ -368,10 +378,15 @@ def main():
 
     ents = {}      # aid -> dict(root, parts, alt_line, batt, domain)
     trails, tick = {}, [0]
+    reflections = {}  # aid -> dict(root, parts)
     GRAY = color.rgb(0.45, 0.45, 0.45)
 
     def update():
         now = pytime.time()
+        
+        # Update water animation
+        water.update(now)
+        
         draw_checkpoints()
         with store.lock:
             snap = dict(store.state)
@@ -396,7 +411,7 @@ def main():
                                  lbl=lbl_anchor)
                 trails[aid] = []
             a = ents[aid]
-            a["root"].position = (x, max(0.3, y), z)
+            a["root"].position = (x, max(0.0, y), z)  # Allow agents to reach water level
             a["root"].rotation_y = math.degrees(yaw)
             if a["alt"]:
                 a["alt"].position = (x, y / 2, z)
@@ -407,7 +422,7 @@ def main():
             low = (not stale) and vb < LOW_BATT_V
             a["batt"].enabled = low
             if low:
-                a["batt"].position = (x, max(0.3, y) + 1.5, z)
+                a["batt"].position = (x, max(0.0, y) + 1.5, z)
                 a["batt"].scale = 0.22 + 0.1 * math.sin(tick[0] * 0.35)
             if tick[0] % 4 == 0 and not stale:
                 trails[aid].append(Entity(model="sphere", scale=0.12,
@@ -442,7 +457,7 @@ def main():
         for aid2, a2 in ents.items():
             if aid2 in snap:
                 x2, y2 = snap[aid2][0], snap[aid2][1]
-                a2["lbl"].position = (x2, max(0.3, y2) + 2.0, snap[aid2][2])
+                a2["lbl"].position = (x2, max(0.0, y2) + 2.0, snap[aid2][2])
         if routes_dirty[0]:
             routes_dirty[0] = False
             rebuild_routes()
