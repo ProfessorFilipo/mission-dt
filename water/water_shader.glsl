@@ -1,11 +1,11 @@
 // VERTEX SHADER
-#version 130
+#version 120
 
 uniform mat4 p3d_ModelViewProjectionMatrix;
 uniform mat4 p3d_ModelMatrix;
-in vec4 p3d_Vertex;
+attribute vec4 p3d_Vertex;
 
-out vec3 worldPos;
+varying vec3 worldPos;
 
 void main() {
     vec4 position = p3d_ModelMatrix * p3d_Vertex;
@@ -14,10 +14,9 @@ void main() {
 }
 
 // FRAGMENT SHADER
-#version 130
+#version 120
 
-in vec3 worldPos;
-out vec4 fragColor;
+varying vec3 worldPos;
 
 uniform float time;
 uniform vec3 camera_pos;
@@ -66,5 +65,5 @@ void main() {
     vec3 color = mix(waterColor, reflection, fresnel * 0.78);
     color += SUN_COLOR * sunGlint * ripples * 0.30;
 
-    fragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(color, 1.0);
 }
