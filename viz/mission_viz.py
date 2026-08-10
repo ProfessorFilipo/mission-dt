@@ -229,11 +229,13 @@ def main():
     water = Water(scale=600, grid_size=120, use_shader=True)
     
     # Add directional lighting for water reflections/shading
-    from ursina import DirectionalLight
+    from ursina import DirectionalLight , AmbientLight
     sun = DirectionalLight(y=20, rotation=(45, 45, 45))
     sun.intensity = 1.2
+    ambient = AmbientLight(color=color.rgba(0.5, 0.5, 0.5, 0.05))
+    ambient.intensity = 0.1
     sky = Entity(model="plane", scale=600, y=12, rotation_x=180,
-                 color=color.rgb(14 / 255, 35 / 255, 60 / 255),
+                 color=color.rgb(185 / 255, 185 / 255, 195 / 255),
                  texture="white_cube", texture_scale=(120, 120),
                  enabled=False)
     cam = EditorCamera()
@@ -286,7 +288,9 @@ def main():
                 pts.append(pts[0])            # close the loop
                 route_ents.append(Entity(
                     model=Mesh(vertices=pts, mode="line", thickness=2),
-                    color=color.rgba(0.35, 1.0, 0.45, 0.9),
+                    color=color.rgb(0.0, 1.0, 0.0),  # Neon green
+                    shader=None,
+                    unshaded=True,
                     enabled=show["route"]))
 
     def refresh_panel():
@@ -380,6 +384,8 @@ def main():
     trails, tick = {}, [0]
     reflections = {}  # aid -> dict(root, parts)
     GRAY = color.rgb(0.45, 0.45, 0.45)
+    WATER_Y = -0.2
+    REFLECTION_COLOR = color.rgba(0.04, 0.16, 0.25, 0.32)
 
     def update():
         now = pytime.time()
@@ -402,17 +408,33 @@ def main():
                               scale=0.25, enabled=False)
                 lbl_anchor = Entity(enabled=show["ids"])
                 Text(parent=lbl_anchor, text=aid, scale=12,
-                     billboard=True, color=color.white)
+                     billboard=True, color=color.white, background=False, 
+                     shader=None, unshaded=True)
                 safe = Entity(model="sphere", enabled=False,
                               scale=2 * SAFE_M / 5.0,
                               color=color.rgba(1, 1, 1, 0.10))
                 ents[aid] = dict(root=root, parts=parts, alt=alt_line,
                                  batt=batt, safe=safe, dom=dom,
                                  lbl=lbl_anchor)
+                # A dim, vertically mirrored duplicate gives agents a planar
+                # reflection without the cost of rendering the whole scene twice.
+                reflection_root, reflection_parts = \
+                    build_aerial() if dom == "aerial" else build_surface()
+                reflection_root.scale_y = -1
+                reflection_root.always_on_top = True
+                for reflection_part, _ in reflection_parts:
+                    reflection_part.color = REFLECTION_COLOR
+                    reflection_part.unshaded = True
+                    reflection_part.always_on_top = True
+                reflections[aid] = dict(root=reflection_root,
+                                        parts=reflection_parts)
                 trails[aid] = []
             a = ents[aid]
             a["root"].position = (x, max(0.0, y), z)  # Allow agents to reach water level
             a["root"].rotation_y = math.degrees(yaw)
+            reflection = reflections[aid]
+            reflection["root"].position = (x, 2 * WATER_Y - max(0.0, y), z)
+            reflection["root"].rotation_y = math.degrees(yaw)
             if a["alt"]:
                 a["alt"].position = (x, y / 2, z)
                 a["alt"].scale_y = max(0.01, y)

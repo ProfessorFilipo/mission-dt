@@ -1,101 +1,86 @@
 
 import os
 import math
-from ursina import Entity, Grid, Shader, color
+from ursina import Entity, Grid, Shader, camera, color
 
 
 class Water:
-    """Animated water surface with shader and fallback procedural deformation."""
 
-    def __init__(self, scale=300, grid_size=80, use_shader=True):
-        """
-        Create an animated water surface.
+    def __init__(self, scale=300, grid_size=80, use_shader=False):
 
-        Args:
-            scale: Size of the water mesh (300-600 recommended for mission viz)
-            grid_size: Grid resolution (80-120 recommended for smooth waves)
-            use_shader: Try to load and use GLSL shader
-        """
         self.scale = scale
         self.grid_size = grid_size
-        self.shader = None
         self.entity = None
-        self.mesh = None
-        self.original_verts = []
+        self.grid_entity = None
+        self.shader = None
+        self._shader_enabled = bool(use_shader)
 
-        # Try to load shader
-        if use_shader:
+        if self._shader_enabled:
             self._load_shader()
 
         # Create mesh
         self._create_mesh()
 
     def _load_shader(self):
-        """Load water shader from file."""
-        shader_path = os.path.join(
-            os.path.dirname(__file__), 'water_shader.glsl'
-        )
-
+        shader_path = os.path.join(os.path.dirname(__file__), "water_shader.glsl")
         try:
-            with open(shader_path, 'r') as f:
+            with open(shader_path, "r", encoding="utf-8") as f:
                 shader_code = f.read()
-
-            parts = shader_code.split('// FRAGMENT SHADER')
+            parts = shader_code.split("// FRAGMENT SHADER", 1)
+            if len(parts) != 2:
+                self.shader = None
+                self._shader_enabled = False
+                print("[Water] Shader format invalid; using fallback water.")
+                return
             self.shader = Shader(
                 language=Shader.GLSL,
                 vertex=parts[0],
-                fragment=parts[1]
+                fragment=parts[1],
             )
             print("[Water] Shader loaded successfully")
-        except Exception as e:
-            print(f"[Water] Shader load failed: {e}")
+        except Exception as exc:
             self.shader = None
+            self._shader_enabled = False
+            print(f"[Water] Shader load failed: {exc}")
 
     def _create_mesh(self):
-        """Create the water mesh entity."""
-        # Use higher resolution grid for visible grid pattern
-        self.mesh = Grid(120, 120)
-
-        # Store original vertices for animation
-        if hasattr(self.mesh, 'vertices'):
-            self.original_verts = list(self.mesh.vertices)
-
-        # Create entity with texture for reflections/shades
+        # Main water surface (receives shader reflections)
         self.entity = Entity(
-            model=self.mesh,
-            scale=600,
-            rotation_x=-90,
-            shader=None,
-            color=color.rgb(0.05, 0.6, 0.85),
-            texture="white_cube",
-            texture_scale=(100, 100)  # Grid pattern
+            model="plane",
+            scale=self.scale,
+            color=color.rgb(0.18, 0.35, 0.50),
+            shader=self.shader if self._shader_enabled else None,
         )
 
-        self.entity.always_on_top = False
+        # Grid overlay on top of water
+        self.grid_entity = Entity(
+            model=Grid(self.grid_size, self.grid_size),
+            scale=self.scale,
+            rotation_x=-90,
+            color=color.rgb(0.30, 0.30, 0.30),
+            unshaded=True,
+        )
 
-        self.entity.y = -0.2  # Close to agents' feet
+        self.entity.y = -0.2
         self.entity.z = 0
         self.entity.x = 0
+        self.grid_entity.y = -0.195
+        self.grid_entity.z = 0
+        self.grid_entity.x = 0
 
-        print(f"[Water] Grid (120x120, scale 600) with texture at y=-48")
+        print(f"[Water] Water+grid ({self.grid_size}x{self.grid_size}, scale {self.scale})")
 
     def update(self, current_time):
+        if not self.entity:
+            return
 
-        # Create dynamic shading by varying color based on time
-        # Simulate light reflections and depth variations
-        base_r = 0.05
-        base_g = 0.6
-        base_b = 0.85
-
-        # Add reflection shimmer
-        shimmer = math.sin(current_time * 2.0) * 0.1
-
-        # Add depth shading - darker edges
-        shade_variation = math.cos(current_time * 0.8) * 0.05
-
-        adjusted_color = color.rgb(
-            max(0.0, base_r + shimmer * 0.05 + shade_variation),
-            max(0.0, base_g + shimmer * 0.1 + shade_variation),
-            max(0.0, base_b + shimmer * 0.08 + shade_variation * 0.5)
-        )
-        self.entity.color = adjusted_color
+        if self._shader_enabled and self.shader is not None:
+            self.entity.set_shader_input("time", current_time)
+            self.entity.set_shader_input("camera_pos", camera.world_position)
+        else:
+            shimmer = math.sin(current_time * 1.5) * 0.03
+            self.entity.color = color.rgb(
+                max(0.10, 0.18 + shimmer),
+                max(0.20, 0.35 + shimmer * 0.6),
+                max(0.32, 0.50 + shimmer * 0.5),
+            )
