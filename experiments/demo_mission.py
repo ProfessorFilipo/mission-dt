@@ -23,6 +23,7 @@ Profiles (used when no explicit assignments):
 Checkpoints are published retained on missiondt/mission/checkpoints so
 the 3D visualizer labels them (P01, P02, ...) with no config file.
 """
+
 import argparse
 import json
 import math
@@ -34,17 +35,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from mission_dt.core import MissionDT
-from mission_dt.agents import VirtualAgent, BASE_LAT, BASE_LON
+from mission_dt.agents import BASE_LAT, BASE_LON, VirtualAgent  # noqa: E402
+from mission_dt.core import MissionDT  # noqa: E402
 
 DURATION_S = 3600.0
-LOOKAHEAD_M = 25.0        # explorador: how far ahead aerial scouts fly
+LOOKAHEAD_M = 25.0  # explorador: how far ahead aerial scouts fly
 
 
 def offset(radius_m, theta, base=(BASE_LAT, BASE_LON)):
-    return (base[0] + radius_m * math.cos(theta) / 111_320.0,
-            base[1] + radius_m * math.sin(theta) /
-            (111_320.0 * math.cos(math.radians(base[0]))))
+    return (
+        base[0] + radius_m * math.cos(theta) / 111_320.0,
+        base[1]
+        + radius_m * math.sin(theta) / (111_320.0 * math.cos(math.radians(base[0]))),
+    )
 
 
 def dist_m(lat1, lon1, lat2, lon2):
@@ -82,9 +85,15 @@ def gen_aleatorio(ids, cfg):
     common = offset(cfg["radius_m"] * 0.8, random.uniform(0, 2 * math.pi))
     for aid in ids:
         alt = cfg["aerial_alt_m"] if aid.startswith("aer") else 0.0
-        wps = [(*offset(random.uniform(10, cfg["radius_m"]),
-                        random.uniform(0, 2 * math.pi)), alt)
-               for _ in range(3)]
+        wps = [
+            (
+                *offset(
+                    random.uniform(10, cfg["radius_m"]), random.uniform(0, 2 * math.pi)
+                ),
+                alt,
+            )
+            for _ in range(3)
+        ]
         wps.append((common[0], common[1], alt))
         routes[aid] = wps
     return routes
@@ -93,33 +102,40 @@ def gen_aleatorio(ids, cfg):
 # ---------------------------------------------------------------- setup
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=str(ROOT / "configs" /
-                                            "mission_default.json"))
+    ap.add_argument("--config", default=str(ROOT / "configs" / "mission_default.json"))
     args = ap.parse_args()
     cfg = json.load(open(args.config))
     profile = cfg.get("profile", "orbitas")
 
-    dt = MissionDT(swarm=True)              # core first
+    dt = MissionDT(swarm=True)  # core first
     # publish checkpoints (retained) for the visualizer labels
-    dt.cli.publish("missiondt/mission/checkpoints",
-                   json.dumps(cfg.get("checkpoints", {})), qos=1, retain=True)
+    dt.cli.publish(
+        "missiondt/mission/checkpoints",
+        json.dumps(cfg.get("checkpoints", {})),
+        qos=1,
+        retain=True,
+    )
 
-    ids = [f"aer{i:02d}" for i in range(cfg["drones"].get("aerial", 0))] + \
-          [f"sur{i:02d}" for i in range(cfg["drones"].get("surface", 0))]
+    ids = [f"aer{i:02d}" for i in range(cfg["drones"].get("aerial", 0))] + [
+        f"sur{i:02d}" for i in range(cfg["drones"].get("surface", 0))
+    ]
 
     # routes: explicit assignments win; otherwise profile generator
     cps = cfg.get("checkpoints", {})
     if cfg.get("assignments"):
-        routes = {aid: [tuple(cps[p]) for p in plist]
-                  for aid, plist in cfg["assignments"].items() if aid in ids}
-        for aid in ids:                       # unassigned agents hold position
+        routes = {
+            aid: [tuple(cps[p]) for p in plist]
+            for aid, plist in cfg["assignments"].items()
+            if aid in ids
+        }
+        for aid in ids:  # unassigned agents hold position
             routes.setdefault(aid, None)
     elif profile == "paralelo":
         routes = gen_paralelo(ids, cfg)
     elif profile == "aleatorio":
         routes = gen_aleatorio(ids, cfg)
     elif profile == "explorador":
-        routes = gen_paralelo(ids, cfg)       # vessels get lanes; aerial dynamic
+        routes = gen_paralelo(ids, cfg)  # vessels get lanes; aerial dynamic
     else:
         routes = gen_orbitas(ids, cfg)
 
@@ -132,17 +148,23 @@ def main():
         agents.append(a)
         idx[aid] = 0
         r = routes.get(aid)
-        goals[aid] = r[0] if r else (a.lat, a.lon,
-                                     cfg["aerial_alt_m"] if dom == "aerial" else 0.0)
+        goals[aid] = (
+            r[0]
+            if r
+            else (a.lat, a.lon, cfg["aerial_alt_m"] if dom == "aerial" else 0.0)
+        )
 
     surface_ids = [i2 for i2 in ids if i2.startswith("sur")]
 
     def pub_routes():
-        payload = {aid: r for aid, r in routes.items()
-                   if r and not (profile == "explorador"
-                                 and aid.startswith("aer"))}
-        dt.cli.publish("missiondt/mission/routes", json.dumps(payload),
-                       qos=1, retain=True)
+        payload = {
+            aid: r
+            for aid, r in routes.items()
+            if r and not (profile == "explorador" and aid.startswith("aer"))
+        }
+        dt.cli.publish(
+            "missiondt/mission/routes", json.dumps(payload), qos=1, retain=True
+        )
 
     pub_routes()
 
@@ -154,24 +176,31 @@ def main():
                 if rec is None:
                     continue
                 # explorador: aerial goal = moving point ahead of paired vessel
-                if profile == "explorador" and aid.startswith("aer") \
-                        and surface_ids and not cfg.get("assignments"):
-                    mate = dt.agents.get(
-                        surface_ids[ids.index(aid) % len(surface_ids)])
+                if (
+                    profile == "explorador"
+                    and aid.startswith("aer")
+                    and surface_ids
+                    and not cfg.get("assignments")
+                ):
+                    mate = dt.agents.get(surface_ids[ids.index(aid) % len(surface_ids)])
                     if mate:
                         s = mate.state
                         goals[aid] = (
                             s.lat + LOOKAHEAD_M * math.cos(s.yaw) / 111_320.0,
-                            s.lon + LOOKAHEAD_M * math.sin(s.yaw) /
-                            (111_320.0 * math.cos(math.radians(s.lat))),
-                            cfg["aerial_alt_m"])
+                            s.lon
+                            + LOOKAHEAD_M
+                            * math.sin(s.yaw)
+                            / (111_320.0 * math.cos(math.radians(s.lat))),
+                            cfg["aerial_alt_m"],
+                        )
                     continue
                 r = routes.get(aid)
                 if not r:
                     continue
                 g = r[idx[aid] % len(r)]
-                if dist_m(rec.state.lat, rec.state.lon, g[0], g[1]) \
-                        < cfg.get("arrive_m", 3.0):
+                if dist_m(rec.state.lat, rec.state.lon, g[0], g[1]) < cfg.get(
+                    "arrive_m", 3.0
+                ):
                     idx[aid] += 1
                     if profile == "aleatorio" and idx[aid] % len(r) == 0:
                         routes.update(gen_aleatorio([aid], cfg))  # new lap
@@ -182,8 +211,10 @@ def main():
     for a in agents:
         a.start()
     threading.Thread(target=monitor, daemon=True).start()
-    print(f"Mission running: {len(ids)} agents "
-          f"({cfg['drones']}), profile='{profile}', swarm ON. Ctrl+C stops.")
+    print(
+        f"Mission running: {len(ids)} agents "
+        f"({cfg['drones']}), profile='{profile}', swarm ON. Ctrl+C stops."
+    )
     dt.run(DURATION_S, goals=goals)
 
 

@@ -10,6 +10,7 @@ position, altitude, speed, battery, telemetry rate, staleness and
 status (OK / STALE / LOWBATT). Runs on any machine that reaches the
 broker -- including alongside the simulation and the 3D view.
 """
+
 import argparse
 import json
 import threading
@@ -23,12 +24,13 @@ STALE_S, LOW_V = 1.5, 17.6
 class Watch:
     def __init__(self):
         self.lock = threading.Lock()
-        self.a = {}   # aid -> dict
+        self.a = {}  # aid -> dict
 
     def reg(self, aid, p):
         with self.lock:
             self.a.setdefault(aid, {}).update(
-                domain=p.get("domain", "?"), kind=p.get("kind", "?"))
+                domain=p.get("domain", "?"), kind=p.get("kind", "?")
+            )
 
     def tel(self, aid, p):
         now = time.time()
@@ -50,18 +52,42 @@ class Watch:
                 d = self.a[aid]
                 age = now - d.get("t", 0)
                 rate = d.get("count", 0) / max(0.001, now - d.get("t0", now))
-                st = "STALE" if age > STALE_S else (
-                    "LOWBATT" if d.get("vb", 99) < LOW_V else "OK")
-                out.append((aid, d.get("domain", "?"), d.get("kind", "?"),
-                            f"{d.get('lat', 0):.5f}", f"{d.get('lon', 0):.5f}",
-                            f"{d.get('alt', 0):5.1f}", f"{d.get('spd', 0):4.1f}",
-                            f"{d.get('vb', 0):5.2f}", f"{rate:4.1f}",
-                            f"{age:4.1f}", st))
+                st = (
+                    "STALE"
+                    if age > STALE_S
+                    else ("LOWBATT" if d.get("vb", 99) < LOW_V else "OK")
+                )
+                out.append(
+                    (
+                        aid,
+                        d.get("domain", "?"),
+                        d.get("kind", "?"),
+                        f"{d.get('lat', 0):.5f}",
+                        f"{d.get('lon', 0):.5f}",
+                        f"{d.get('alt', 0):5.1f}",
+                        f"{d.get('spd', 0):4.1f}",
+                        f"{d.get('vb', 0):5.2f}",
+                        f"{rate:4.1f}",
+                        f"{age:4.1f}",
+                        st,
+                    )
+                )
         return out
 
 
-HEAD = ("ID", "DOMAIN", "KIND", "LAT", "LON", "ALT m", "SPD", "VBAT",
-        "Hz", "AGE s", "STATUS")
+HEAD = (
+    "ID",
+    "DOMAIN",
+    "KIND",
+    "LAT",
+    "LON",
+    "ALT m",
+    "SPD",
+    "VBAT",
+    "Hz",
+    "AGE s",
+    "STATUS",
+)
 
 
 def main():
@@ -85,8 +111,9 @@ def main():
     cli = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="panel")
     cli.on_message = onm
     cli.connect(args.host, 1883)
-    cli.subscribe([("missiondt/agents/+/telemetry", 0),
-                   ("missiondt/agents/+/register", 1)])
+    cli.subscribe(
+        [("missiondt/agents/+/telemetry", 0), ("missiondt/agents/+/register", 1)]
+    )
     cli.loop_start()
 
     try:
@@ -98,8 +125,7 @@ def main():
             for h in HEAD:
                 t.add_column(h)
             for r in w.rows():
-                style = {"OK": "green", "STALE": "grey50",
-                         "LOWBATT": "red"}[r[-1]]
+                style = {"OK": "green", "STALE": "grey50", "LOWBATT": "red"}[r[-1]]
                 t.add_row(*r, style=style)
             return t
 

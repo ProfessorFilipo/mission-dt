@@ -13,11 +13,12 @@ Each agent k has:
   A_k^t  : actuation model (throttle, steering), computed by lambda
 The DT runs at a fixed frame period T_f (default 125 ms, as in Fleet-DT).
 """
+
 import json
 import math
-import time
 import threading
-from collections import deque, defaultdict
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
 import paho.mqtt.client as mqtt
@@ -31,28 +32,29 @@ FRAME_MS = 125.0  # DT frame period (ms)
 @dataclass
 class AgentState:
     """B_k^t : lat, lon, alt, attitude, body velocities."""
+
     lat: float = 0.0
     lon: float = 0.0
     alt: float = 0.0
     roll: float = 0.0
     pitch: float = 0.0
     yaw: float = 0.0
-    u: float = 0.0   # surge (m/s)
-    v: float = 0.0   # sway  (m/s)
-    w: float = 0.0   # heave (m/s)
+    u: float = 0.0  # surge (m/s)
+    v: float = 0.0  # sway  (m/s)
+    w: float = 0.0  # heave (m/s)
     battery_v: float = 18.5
-    t: float = 0.0   # timestamp of last update
+    t: float = 0.0  # timestamp of last update
 
 
 @dataclass
 class AgentRecord:
     agent_id: str
-    domain: str                 # "aerial" | "surface"
-    kind: str                   # "physical" | "virtual"
+    domain: str  # "aerial" | "surface"
+    kind: str  # "physical" | "virtual"
     state: AgentState = field(default_factory=AgentState)
     history: deque = field(default_factory=lambda: deque(maxlen=8))  # [B^i;B^j]
     last_seq: int = -1
-    goal: tuple = (0.0, 0.0, 0.0)   # g_k^t : target lat, lon, alt
+    goal: tuple = (0.0, 0.0, 0.0)  # g_k^t : target lat, lon, alt
     stale: bool = True
 
 
@@ -68,29 +70,38 @@ class MissionDT:
     Collects per-frame and per-message metrics.
     """
 
-    def __init__(self, host="127.0.0.1", frame_ms=FRAME_MS, viz_hook=None,
-                 swarm=False, sep_m=12.0):
+    def __init__(
+        self,
+        host="127.0.0.1",
+        frame_ms=FRAME_MS,
+        viz_hook=None,
+        swarm=False,
+        sep_m=12.0,
+    ):
         self.frame_s = frame_ms / 1000.0
-        self.swarm = swarm          # enable inter-agent separation (phi context)
-        self.sep_m = sep_m          # separation threshold (meters)
-        self.avoid_events = 0       # frames in which avoidance overrode lambda
+        self.swarm = swarm  # enable inter-agent separation (phi context)
+        self.sep_m = sep_m  # separation threshold (meters)
+        self.avoid_events = 0  # frames in which avoidance overrode lambda
         self.agents: dict[str, AgentRecord] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self.viz_hook = viz_hook  # callable(agents_dict) -> None (3D frontend)
 
         # metrics
-        self.msg_latencies = []          # publish -> DT ingestion (s)
-        self.frame_compute = []          # delta+lambda compute time per frame (s)
-        self.frame_overruns = 0          # frames whose work exceeded T_f
+        self.msg_latencies = []  # publish -> DT ingestion (s)
+        self.frame_compute = []  # delta+lambda compute time per frame (s)
+        self.frame_overruns = 0  # frames whose work exceeded T_f
         self.frames = 0
-        self.stale_updates = 0           # frames where an agent had no fresh telemetry
-        self.dup_updates = 0             # >1 telemetry msg consumed in one frame
+        self.stale_updates = 0  # frames where an agent had no fresh telemetry
+        self.dup_updates = 0  # >1 telemetry msg consumed in one frame
         self.bytes_in = 0
         self._pending = defaultdict(list)  # agent_id -> [telemetry dicts]
 
-        self.cli = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                               client_id="mission-dt", protocol=mqtt.MQTTv5)
+        self.cli = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id="mission-dt",
+            protocol=mqtt.MQTTv5,
+        )
         self.cli.on_message = self._on_msg
         self.cli.connect(host, 1883)
         self.cli.subscribe("missiondt/agents/+/telemetry", qos=0)
@@ -110,7 +121,8 @@ class MissionDT:
         if kind_topic == "register":
             with self._lock:
                 self.agents[aid] = AgentRecord(
-                    agent_id=aid, domain=payload["domain"], kind=payload["kind"])
+                    agent_id=aid, domain=payload["domain"], kind=payload["kind"]
+                )
             return
         # telemetry: I_k^t
         self.msg_latencies.append(now - payload["t_pub"])
@@ -128,9 +140,8 @@ class MissionDT:
             # only after the first real telemetry has seeded the state
             if rec.last_seq >= 0 and len(rec.history) >= 2:
                 b1, b0 = rec.history[-1], rec.history[-2]
-                dt = self.frame_s
-                rec.state.lat += (b1.lat - b0.lat)
-                rec.state.lon += (b1.lon - b0.lon)
+                rec.state.lat += b1.lat - b0.lat
+                rec.state.lon += b1.lon - b0.lon
                 rec.state.alt += (b1.alt - b0.alt) if rec.domain == "aerial" else 0
         else:
             if len(telems) > 1:
@@ -166,7 +177,6 @@ class MissionDT:
             act["climb"] = max(-1.0, min(1.0, (g[2] - s.alt) / 5.0))
         return act
 
-
     # ------------------------------------------------------------------
     # phi + swarm rule : mission context (inter-agent distances) feeding
     # a separation behavior. Returns (neighbor, dist, away_bearing) when
@@ -175,17 +185,19 @@ class MissionDT:
     def _separation(self, rec: AgentRecord, agents: list):
         best, bd, bdx, bdy = None, 1e12, 0.0, 0.0
         for other in agents:
-            if other is rec or other.domain != rec.domain \
-                    or other.last_seq < 0:
+            if other is rec or other.domain != rec.domain or other.last_seq < 0:
                 continue
             dy = (other.state.lat - rec.state.lat) * 111_320.0
-            dx = (other.state.lon - rec.state.lon) * 111_320.0 * \
-                math.cos(math.radians(rec.state.lat))
+            dx = (
+                (other.state.lon - rec.state.lon)
+                * 111_320.0
+                * math.cos(math.radians(rec.state.lat))
+            )
             d = math.hypot(dx, dy)
             if d < bd:
                 best, bd, bdx, bdy = other, d, dx, dy
         if best is not None and bd < self.sep_m:
-            away = math.atan2(-bdx, -bdy)   # bearing pointing away from neighbor
+            away = math.atan2(-bdx, -bdy)  # bearing pointing away from neighbor
             return best, bd, away
         return None
 
@@ -205,7 +217,7 @@ class MissionDT:
                 self._delta(rec, pending.get(rec.agent_id, []))
             for rec in agents:
                 if rec.last_seq < 0:
-                    continue          # never heard from (e.g., stale ghost)
+                    continue  # never heard from (e.g., stale ghost)
                 act = self._lambda(rec)
                 if self.swarm:
                     hit = self._separation(rec, agents)
@@ -215,11 +227,12 @@ class MissionDT:
                         act["alpha"] = max(-1.0, min(1.0, 1.5 * err))
                         act["tau"] = min(act["tau"], 0.5)
                         act["avoid"] = True
-                        act["trig_t"] = nb.state.t     # neighbor telemetry timestamp
+                        act["trig_t"] = nb.state.t  # neighbor telemetry timestamp
                         act["trig_id"] = nb.agent_id
                         self.avoid_events += 1
-                self.cli.publish(f"missiondt/agents/{rec.agent_id}/actuation",
-                                 json.dumps(act), qos=0)
+                self.cli.publish(
+                    f"missiondt/agents/{rec.agent_id}/actuation", json.dumps(act), qos=0
+                )
             if self.viz_hook:
                 self.viz_hook(agents)
             work = time.monotonic() - t0

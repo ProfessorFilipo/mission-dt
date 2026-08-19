@@ -57,6 +57,7 @@ screenshot whenever you like. sur05 keeps moving in the background;
 wait for it to be somewhere unobtrusive if you want it out of the shot,
 or let it add a touch of life to the picture.
 """
+
 import json
 import math
 import sys
@@ -65,8 +66,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from mission_dt.agents import BASE_LAT, BASE_LON, VirtualAgent
 from mission_dt.core import MissionDT
-from mission_dt.agents import VirtualAgent, BASE_LAT, BASE_LON
 
 M_PER_DEG_LAT = 111_320.0
 M_PER_DEG_LON = 111_320.0 * math.cos(math.radians(BASE_LAT))
@@ -75,8 +76,7 @@ ARRIVE_M = 3.0
 
 def offset(east_m, north_m, base=(BASE_LAT, BASE_LON)):
     """Return (lat, lon) of a point east_m/north_m metres from base."""
-    return (base[0] + north_m / M_PER_DEG_LAT,
-            base[1] + east_m / M_PER_DEG_LON)
+    return (base[0] + north_m / M_PER_DEG_LAT, base[1] + east_m / M_PER_DEG_LON)
 
 
 def bearing_to(from_ll, to_ll):
@@ -149,12 +149,12 @@ agents.append(a)
 # not one fused shape.
 a = VirtualAgent("sur03", domain="surface", duration_s=3600)
 lat, lon = offset(BRIDGE_E - 1.0, BRIDGE_N)
-goals["sur03"] = freeze(a, lat, lon, 0.0, math.pi / 2)        # facing east
+goals["sur03"] = freeze(a, lat, lon, 0.0, math.pi / 2)  # facing east
 agents.append(a)
 
 a = VirtualAgent("sur04", domain="surface", duration_s=3600)
 lat, lon = offset(BRIDGE_E + 1.0, BRIDGE_N)
-goals["sur04"] = freeze(a, lat, lon, 0.0, 0.0)                # facing north
+goals["sur04"] = freeze(a, lat, lon, 0.0, 0.0)  # facing north
 agents.append(a)
 
 # --- calm, normal-operation agents beyond the bridge pair -----------------
@@ -188,8 +188,13 @@ def patrol_monitor():
         if rec is None:
             continue
         tgt = LOOP[loop_idx[0] % len(LOOP)]
-        if math.hypot((tgt[0] - rec.state.lat) * M_PER_DEG_LAT,
-                      (tgt[1] - rec.state.lon) * M_PER_DEG_LON) < ARRIVE_M:
+        if (
+            math.hypot(
+                (tgt[0] - rec.state.lat) * M_PER_DEG_LAT,
+                (tgt[1] - rec.state.lon) * M_PER_DEG_LON,
+            )
+            < ARRIVE_M
+        ):
             loop_idx[0] += 1
             nxt = LOOP[loop_idx[0] % len(LOOP)]
             goals["sur05"] = (*nxt, 0.0)
@@ -200,14 +205,20 @@ for ag in agents:
     ag.start()
 
 dt = MissionDT(swarm=False)
-dt.cli.publish("missiondt/mission/checkpoints", json.dumps(checkpoints),
-               qos=1, retain=True)
-dt.cli.publish("missiondt/mission/routes",
-               json.dumps({"sur05": [(*p, 0.0) for p in LOOP]}),
-               qos=1, retain=True)
+dt.cli.publish(
+    "missiondt/mission/checkpoints", json.dumps(checkpoints), qos=1, retain=True
+)
+dt.cli.publish(
+    "missiondt/mission/routes",
+    json.dumps({"sur05": [(*p, 0.0) for p in LOOP]}),
+    qos=1,
+    retain=True,
+)
 threading.Thread(target=patrol_monitor, daemon=True).start()
 
-print("Staged scene running -- eight agents frozen, sur05 patrolling "
-      "the perimeter. Open the 3D view and screenshot whenever you "
-      "like. Ctrl+C to stop.")
+print(
+    "Staged scene running -- eight agents frozen, sur05 patrolling "
+    "the perimeter. Open the 3D view and screenshot whenever you "
+    "like. Ctrl+C to stop."
+)
 dt.run(3600.0, goals=goals)

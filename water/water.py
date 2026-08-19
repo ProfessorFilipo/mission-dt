@@ -1,11 +1,10 @@
-
-import os
 import math
+import os
+
 from ursina import Entity, Grid, Shader, camera, color
 
 
 class Water:
-
     def __init__(self, scale=300, grid_size=80, use_shader=False):
 
         self.scale = scale
@@ -68,7 +67,10 @@ class Water:
         self.grid_entity.z = 0
         self.grid_entity.x = 0
 
-        print(f"[Water] Water+grid ({self.grid_size}x{self.grid_size}, scale {self.scale})")
+        print(
+            f"[Water] Water+grid ({self.grid_size}x{self.grid_size}, "
+            f"scale {self.scale})"
+        )
 
     def update(self, current_time):
         if not self.entity:

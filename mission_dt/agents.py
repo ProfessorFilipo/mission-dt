@@ -9,28 +9,37 @@ Sensors are sampled at their native rate (SENSOR_HZ); the bandwidth
 regulator forwards only every k-th sample so that the network sees
 PUBLISH_HZ, matching the DT frame rate (Fleet-DT regulator scheme).
 """
+
 import json
 import math
 import random
-import time
 import threading
+import time
 
 import paho.mqtt.client as mqtt
 
-SENSOR_HZ = 50.0    # native IMU/estimator sampling rate
-PUBLISH_HZ = 8.0    # regulated network rate (= 1/125 ms)
+SENSOR_HZ = 50.0  # native IMU/estimator sampling rate
+PUBLISH_HZ = 8.0  # regulated network rate (= 1/125 ms)
 BASE_LAT, BASE_LON = -30.0577, -51.1729  # Porto Alegre test area
 
 
 class VirtualAgent(threading.Thread):
-    def __init__(self, agent_id, domain="surface", host="127.0.0.1",
-                 regulator=True, duration_s=30.0, jitter=True, loss=0.0):
+    def __init__(
+        self,
+        agent_id,
+        domain="surface",
+        host="127.0.0.1",
+        regulator=True,
+        duration_s=30.0,
+        jitter=True,
+        loss=0.0,
+    ):
         super().__init__(daemon=True)
         self.aid, self.domain = agent_id, domain
         self.regulator = regulator
-        self.loss = loss              # simulated network loss probability
+        self.loss = loss  # simulated network loss probability
         self.lost_msgs = 0
-        self.truth_log = []           # (t, lat, lon, yaw) ground truth
+        self.truth_log = []  # (t, lat, lon, yaw) ground truth
         self.duration = duration_s
         self.jitter = jitter
         # physical state (ground truth of the emulated vehicle)
@@ -44,17 +53,22 @@ class VirtualAgent(threading.Thread):
         self.seq = 0
         self.bytes_out = 0
         self.msgs_out = 0
-        self.act_latencies = []   # DT actuation publish -> agent apply (s)
-        self.swarm_latencies = []  # neighbor telemetry pub -> corrective actuation here (s)
+        self.act_latencies = []  # DT actuation publish -> agent apply (s)
+        # Neighbor telemetry publication -> corrective local actuation (s).
+        self.swarm_latencies = []
 
-        self.cli = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                               client_id=agent_id, protocol=mqtt.MQTTv5)
+        self.cli = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2, client_id=agent_id, protocol=mqtt.MQTTv5
+        )
         self.cli.on_message = self._on_act
         self.cli.connect(host, 1883)
         self.cli.subscribe(f"missiondt/agents/{agent_id}/actuation", qos=0)
-        self.cli.publish(f"missiondt/agents/{agent_id}/register",
-                         json.dumps({"domain": domain, "kind": "virtual"}),
-                         qos=1, retain=True)
+        self.cli.publish(
+            f"missiondt/agents/{agent_id}/register",
+            json.dumps({"domain": domain, "kind": "virtual"}),
+            qos=1,
+            retain=True,
+        )
         self.cli.loop_start()
 
     # actuation A_k^t from the Mission-DT (two-way channel: DT -> twin)
@@ -74,7 +88,9 @@ class VirtualAgent(threading.Thread):
         self.yaw += self.alpha * (0.6 if self.domain == "surface" else 1.5) * dt
         dist = self.speed * dt
         self.lat += dist * math.cos(self.yaw) / 111_320.0
-        self.lon += dist * math.sin(self.yaw) / (111_320.0 * math.cos(math.radians(self.lat)))
+        self.lon += (
+            dist * math.sin(self.yaw) / (111_320.0 * math.cos(math.radians(self.lat)))
+        )
         if self.domain == "aerial":
             self.alt = max(0.0, self.alt + self.climb * 2.0 * dt)
         self.vb -= 0.00005 * (1 + self.tau) * dt * 60
@@ -82,14 +98,20 @@ class VirtualAgent(threading.Thread):
     def _telemetry(self):
         n = (lambda s: random.gauss(0, s)) if self.jitter else (lambda s: 0)
         return {
-            "t_pub": time.time(), "seq": self.seq,
+            "t_pub": time.time(),
+            "seq": self.seq,
             "gps": [self.lat + n(1e-6), self.lon + n(1e-6), self.alt + n(0.1)],
             "att": [n(0.01), n(0.01), self.yaw + n(0.005)],
-            "vel": [self.speed + n(0.02), n(0.02), self.climb if self.domain == "aerial" else n(0.01)],
+            "vel": [
+                self.speed + n(0.02),
+                n(0.02),
+                self.climb if self.domain == "aerial" else n(0.01),
+            ],
             "imu": [n(0.05), n(0.05), 9.81 + n(0.05), n(0.01), n(0.01), n(0.01)],
             "mag": [22.0 + n(0.2), -8.0 + n(0.2), -12.0 + n(0.2)],
             "baro": [101_325 + n(5), 24.0 + n(0.05)],
-            "vb": self.vb, "ib": 1.2 + 6.0 * self.tau + n(0.05),
+            "vb": self.vb,
+            "ib": 1.2 + 6.0 * self.tau + n(0.05),
         }
 
     def run(self):
@@ -103,11 +125,10 @@ class VirtualAgent(threading.Thread):
             if not self.regulator or tick % decim == 0:
                 self.seq += 1
                 if self.loss > 0.0 and random.random() < self.loss:
-                    self.lost_msgs += 1          # dropped by the "network"
+                    self.lost_msgs += 1  # dropped by the "network"
                 else:
                     p = json.dumps(self._telemetry())
-                    self.cli.publish(f"missiondt/agents/{self.aid}/telemetry",
-                                     p, qos=0)
+                    self.cli.publish(f"missiondt/agents/{self.aid}/telemetry", p, qos=0)
                     self.bytes_out += len(p)
                     self.msgs_out += 1
             tick += 1
@@ -118,8 +139,9 @@ class VirtualAgent(threading.Thread):
             else:
                 t_next = time.monotonic()
         # deregister: clear our retained registration so no ghost remains
-        self.cli.publish(f"missiondt/agents/{self.aid}/register",
-                         payload=b"", qos=1, retain=True)
+        self.cli.publish(
+            f"missiondt/agents/{self.aid}/register", payload=b"", qos=1, retain=True
+        )
         time.sleep(0.1)
         self.cli.loop_stop()
         self.cli.disconnect()

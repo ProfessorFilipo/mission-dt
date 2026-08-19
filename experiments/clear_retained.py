@@ -5,6 +5,7 @@ or demos, or let run_all.sh call it automatically.
 
     python experiments/clear_retained.py [--host 127.0.0.1]
 """
+
 import argparse
 import threading
 import time
@@ -29,16 +30,15 @@ def main():
     cli.connect(args.host, 1883)
     cli.subscribe("missiondt/#", qos=1)
     cli.loop_start()
-    time.sleep(1.5)                      # collect retained backlog
+    time.sleep(1.5)  # collect retained backlog
     with lock:
         found = sorted(topics)
-    for t in found:                      # empty retained payload = delete
+    for t in found:  # empty retained payload = delete
         cli.publish(t, payload=b"", qos=1, retain=True)
     time.sleep(0.5)
     cli.loop_stop()
     cli.disconnect()
-    print(f"cleared {len(found)} retained topic(s)"
-          + (":" if found else ""))
+    print(f"cleared {len(found)} retained topic(s)" + (":" if found else ""))
     for t in found[:20]:
         print("  ", t)
     if len(found) > 20:
