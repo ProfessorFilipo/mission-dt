@@ -20,22 +20,38 @@ Controls: right-drag orbit / scroll zoom / middle-drag pan
   O or [PANEL] : toggle floating agent panel (reuses panel.py's Watch)
   G : sky grid   |   ESC : quit
 """
+
 import argparse
 import datetime
 import glob
+import importlib.util
 import json
 import math
 import os
+import sys
 import threading
 import time as pytime
-
-import importlib.util
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
 from panda3d.core import ClockObject
-from ursina import (Ursina, Entity, EditorCamera, Text, Button, Mesh,
-                    color, window, held_keys, application, destroy)
+from ursina import (
+    Button,
+    EditorCamera,
+    Entity,
+    Mesh,
+    Slider,
+    Text,
+    Ursina,
+    application,
+    color,
+    destroy,
+    window,
+)
+
+# Add parent directory to path to import water module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from water.water import Water
 
 # reuse the Watch class from the terminal panel (panel.py stays untouched)
 _pp = Path(__file__).resolve().parent.parent / "experiments" / "panel.py"
@@ -45,51 +61,89 @@ _spec.loader.exec_module(_panel_mod)
 Watch, PANEL_HEAD = _panel_mod.Watch, _panel_mod.HEAD
 
 BASE_LAT, BASE_LON = -30.0577, -51.1729
-SCALE = 111_320.0 / 5.0      # 1 scene unit = 5 m
+SCALE = 111_320.0 / 5.0  # 1 scene unit = 5 m
+AERIAL_MODEL_SCALE = 0.24
+SURFACE_MODEL_SCALE = 0.45
 TRAIL_LEN = 60
 STALE_S = 1.5
 LOW_BATT_V = 17.6
-SAFE_M = 12.0    # separation threshold (matches mission core sep_m)
-COLL_M = 3.0     # near-collision distance
-SHOW_M = 24.0    # sphere becomes visible below this neighbor distance
+SAFE_M = 12.0  # separation threshold (matches mission core sep_m)
+COLL_M = 3.0  # near-collision distance
+SHOW_M = 24.0  # sphere becomes visible below this neighbor distance
 CAPT = "captures"
 
 
 # ------------------------------------------------------------------ models
 def build_aerial():
-    root = Entity()
+    root = Entity(scale=AERIAL_MODEL_SCALE)
     parts = []
-    body = Entity(parent=root, model="sphere", scale=(0.55, 0.28, 0.75),
-                  color=color.orange)
+    body = Entity(
+        parent=root, model="sphere", scale=(0.55, 0.28, 0.75), color=color.orange
+    )
     parts.append((body, color.orange))
     for dx, dz in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
-        arm = Entity(parent=root, model="cube", position=(dx * 0.55, 0, dz * 0.55),
-                     scale=(0.12, 0.07, 0.9), rotation_y=45 * dx * dz,
-                     color=color.rgb(0.75, 0.35, 0.05))
-        rotor = Entity(parent=root, model="sphere",
-                       position=(dx * 0.85, 0.1, dz * 0.85),
-                       scale=(0.45, 0.07, 0.45), color=color.rgb(0.35, 0.35, 0.4))
-        parts += [(arm, color.rgb(0.75, 0.35, 0.05)),
-                  (rotor, color.rgb(0.35, 0.35, 0.4))]
-    nose = Entity(parent=root, model="cube", position=(0, 0, 0.75),
-                  scale=(0.12, 0.12, 0.4), color=color.white)
+        arm = Entity(
+            parent=root,
+            model="cube",
+            position=(dx * 0.55, 0, dz * 0.55),
+            scale=(0.12, 0.07, 0.9),
+            rotation_y=45 * dx * dz,
+            color=color.rgb(0.75, 0.35, 0.05),
+        )
+        rotor = Entity(
+            parent=root,
+            model="sphere",
+            position=(dx * 0.85, 0.1, dz * 0.85),
+            scale=(0.45, 0.07, 0.45),
+            color=color.rgb(0.35, 0.35, 0.4),
+        )
+        parts += [
+            (arm, color.rgb(0.75, 0.35, 0.05)),
+            (rotor, color.rgb(0.35, 0.35, 0.4)),
+        ]
+    nose = Entity(
+        parent=root,
+        model="cube",
+        position=(0, 0, 0.75),
+        scale=(0.12, 0.12, 0.4),
+        color=color.white,
+    )
     parts.append((nose, color.white))
     return root, parts
 
 
 def build_surface():
-    root = Entity()
+    root = Entity(scale=SURFACE_MODEL_SCALE)
     parts = []
-    hull = Entity(parent=root, model="cube", scale=(0.9, 0.35, 2.2),
-                  color=color.azure)
-    bow = Entity(parent=root, model="cube", position=(0, 0, 1.25),
-                 scale=(0.64, 0.34, 0.64), rotation_y=45, color=color.azure)
-    cabin = Entity(parent=root, model="cube", position=(0, 0.3, -0.45),
-                   scale=(0.55, 0.3, 0.7), color=color.rgb(0.55, 0.75, 0.95))
-    tip = Entity(parent=root, model="cube", position=(0, 0.12, 1.62),
-                 scale=(0.14, 0.14, 0.3), color=color.white)
-    for e, c in [(hull, color.azure), (bow, color.azure),
-                 (cabin, color.rgb(0.55, 0.75, 0.95)), (tip, color.white)]:
+    hull = Entity(parent=root, model="cube", scale=(0.9, 0.35, 2.2), color=color.azure)
+    bow = Entity(
+        parent=root,
+        model="cube",
+        position=(0, 0, 1.25),
+        scale=(0.64, 0.34, 0.64),
+        rotation_y=45,
+        color=color.azure,
+    )
+    cabin = Entity(
+        parent=root,
+        model="cube",
+        position=(0, 0.3, -0.45),
+        scale=(0.55, 0.3, 0.7),
+        color=color.rgb(0.55, 0.75, 0.95),
+    )
+    tip = Entity(
+        parent=root,
+        model="cube",
+        position=(0, 0.12, 1.62),
+        scale=(0.14, 0.14, 0.3),
+        color=color.white,
+    )
+    for e, c in [
+        (hull, color.azure),
+        (bow, color.azure),
+        (cabin, color.rgb(0.55, 0.75, 0.95)),
+        (tip, color.white),
+    ]:
         parts.append((e, c))
     return root, parts
 
@@ -98,7 +152,7 @@ def build_surface():
 class Store:
     def __init__(self):
         self.lock = threading.Lock()
-        self.state = {}   # aid -> (x, y, z, yaw, domain, vb, t_seen)
+        self.state = {}  # aid -> (x, y, z, yaw, domain, vb, t_seen)
 
     def update(self, aid, p):
         lat, lon, alt = p["gps"]
@@ -106,8 +160,15 @@ class Store:
         z = (lat - BASE_LAT) * SCALE
         dom = "aerial" if alt > 1.0 else "surface"
         with self.lock:
-            self.state[aid] = (x, alt / 5.0, z, p["att"][2], dom,
-                               p.get("vb", 18.5), pytime.time())
+            self.state[aid] = (
+                x,
+                alt / 5.0,
+                z,
+                p["att"][2],
+                dom,
+                p.get("vb", 18.5),
+                pytime.time(),
+            )
 
 
 # ------------------------------------------------------------------ video
@@ -121,8 +182,9 @@ class Recorder:
         os.makedirs(d, exist_ok=True)
         self.prefix = os.path.join(d, "f").replace("\\", "/")
         fps = 30 if self.hq else 15
-        application.base.movie(namePrefix=self.prefix, duration=3600,
-                               fps=fps, format="jpg", sd=6)
+        application.base.movie(
+            namePrefix=self.prefix, duration=3600, fps=fps, format="jpg", sd=6
+        )
         self.on, self.t0 = True, pytime.time()
         print(f"[REC] recording at {fps} fps -> {d}")
 
@@ -137,13 +199,18 @@ class Recorder:
         out = d + (".mp4")
         frames = sorted(glob.glob(self.prefix + "_*.jpg"))
         if not frames:
-            print("[REC] no frames captured"); return
-        print(f"[REC] encoding {len(frames)} frames -> {out} (window may "
-              "freeze for a moment)")
+            print("[REC] no frames captured")
+            return
+        print(
+            f"[REC] encoding {len(frames)} frames -> {out} (window may "
+            "freeze for a moment)"
+        )
         try:
             import imageio.v2 as imageio
-            w = imageio.get_writer(out, fps=fps, codec="libx264",
-                                   quality=8 if self.hq else 4)
+
+            w = imageio.get_writer(
+                out, fps=fps, codec="libx264", quality=8 if self.hq else 4
+            )
             for f in frames:
                 w.append_data(imageio.imread(f))
             w.close()
@@ -154,8 +221,10 @@ class Recorder:
         except ImportError:
             print("[REC] imageio not installed; frames kept in", d)
             print("      pip install imageio imageio-ffmpeg   or encode with:")
-            print(f"      ffmpeg -framerate {fps} -i {self.prefix}_%06d.jpg "
-                  f"-c:v libx264 -pix_fmt yuv420p {out}")
+            print(
+                f"      ffmpeg -framerate {fps} -i {self.prefix}_%06d.jpg "
+                f"-c:v libx264 -pix_fmt yuv420p {out}"
+            )
 
 
 # ------------------------------------------------------------------ main
@@ -178,9 +247,10 @@ def main():
     cli.on_message = on_telemetry
     cli.connect(args.host, 1883)
     cli.subscribe("missiondt/agents/+/telemetry")
+
     def on_register(c, u, m):
         if not m.payload:
-            return                     # deregistration (cleared retained)
+            return  # deregistration (cleared retained)
         try:
             watch.reg(m.topic.split("/")[2], json.loads(m.payload))
         except json.JSONDecodeError:
@@ -216,49 +286,95 @@ def main():
     cli.loop_start()
 
     app = Ursina(title="Mission-DT")
-    window.borderless = False          # normal window (fixes macOS cropping)
+    window.borderless = False  # normal window (fixes macOS cropping)
     window.color = color.rgb(10 / 255, 20 / 255, 40 / 255)
     window.fps_counter.enabled = True
-    Entity(model="plane", scale=600,
-           color=color.rgb(20 / 255, 60 / 255, 90 / 255),
-           texture="white_cube", texture_scale=(120, 120))
-    sky = Entity(model="plane", scale=600, y=12, rotation_x=180,
-                 color=color.rgb(14 / 255, 35 / 255, 60 / 255),
-                 texture="white_cube", texture_scale=(120, 120),
-                 enabled=False)
+
+    # Create animated water surface
+    water = Water(scale=600, grid_size=120, use_shader=True)
+
+    # Add directional lighting for water reflections/shading
+    from ursina import AmbientLight, DirectionalLight
+
+    sun = DirectionalLight(y=20, rotation=(45, 45, 45))
+    sun.intensity = 1.2
+    ambient = AmbientLight(color=color.rgba(0.5, 0.5, 0.5, 0.05))
+    ambient.intensity = 0.1
+    sky = Entity(
+        model="plane",
+        scale=600,
+        y=12,
+        rotation_x=180,
+        color=color.rgb(185 / 255, 185 / 255, 195 / 255),
+        texture="white_cube",
+        texture_scale=(120, 120),
+        enabled=False,
+    )
     cam = EditorCamera()
     cam.rotation_x = 40
     cam.target_z = -55
     hud = Text(text="agents: 0", position=(-0.45, 0.46), scale=0.8)
     rec = Recorder()
     show = {"ids": False, "route": False, "leg": False, "panel": False}
+    model_scale = {
+        "aerial": AERIAL_MODEL_SCALE,
+        "surface": SURFACE_MODEL_SCALE,
+    }
 
     LEGEND = (
-        "LEGENDA\n"
-        "laranja (4 bracos) = drone aereo\n"
-        "azul (casco) = embarcacao\n"
-        "linha vertical = altitude do aereo\n"
-        "pontos cinza = trilha percorrida\n"
-        "linha verde = rota planejada\n"
-        "esfera branca = aproximacao (<24 m)\n"
-        "esfera laranja = conflito (<12 m)\n"
-        "esfera vermelha = quase-colisao (<3 m)\n"
-        "pino ciano/laranja/roxo =\n"
-        "  checkpoint superficie/aereo/submerso\n"
-        "vermelho pulsante = bateria baixa\n"
-        "drone cinza = sem comunicacao")
+        "===============================\n"
+        "CAPTION\n"
+        "orange (4 arms) = aerial drone\n"
+        "blue (hull) = vessel\n"
+        "vertical line = aerial's altitude\n"
+        "gray dots = path traveled\n"
+        "green line = planned route\n"
+        "white sphere = approximation (<24 m)\n"
+        "orange sphere = conflict (<12 m)\n"
+        "red sphere = near-collision (<3 m)\n"
+        "pin cyan/orange/purple =\n"
+        "  checkpoint surface/aerial/submerged\n"
+        "pulsating red = low battery\n"
+        "gray drone = no communication\n"
+        "===============================\n"
+        "default aerial model scale = 0.24\n"
+        "default surface model scale = 0.45"
+    )
     from ursina import camera as _cam
-    leg_bg = Entity(parent=_cam.ui, model="quad", scale=(0.36, 0.34),
-                    position=(0.52, 0.18), color=color.rgba(0, 0, 0, 0.45),
-                    enabled=False)
-    leg_txt = Text(parent=_cam.ui, text=LEGEND, position=(0.36, 0.34),
-                   scale=0.62, color=color.white, enabled=False)
 
-    pan_bg = Entity(parent=_cam.ui, model="quad", scale=(0.9, 0.36),
-                    position=(0.0, 0.24), color=color.rgba(0, 0, 0, 0.55),
-                    enabled=False)
-    pan_txt = Text(parent=_cam.ui, text="", position=(-0.43, 0.40),
-                   scale=0.55, color=color.white, enabled=False)
+    leg_bg = Entity(
+        parent=_cam.ui,
+        model="quad",
+        scale=(0.36, 0.34),
+        position=(0.52, 0.18),
+        color=color.rgba(0, 0, 0, 0.45),
+        enabled=False,
+    )
+    leg_txt = Text(
+        parent=_cam.ui,
+        text=LEGEND,
+        position=(0.36, 0.34),
+        scale=0.62,
+        color=color.white,
+        enabled=False,
+    )
+
+    pan_bg = Entity(
+        parent=_cam.ui,
+        model="quad",
+        scale=(0.9, 0.36),
+        position=(0.0, 0.24),
+        color=color.rgba(0, 0, 0, 0.55),
+        enabled=False,
+    )
+    pan_txt = Text(
+        parent=_cam.ui,
+        text="",
+        position=(-0.43, 0.40),
+        scale=0.55,
+        color=color.white,
+        enabled=False,
+    )
 
     route_ents = []
 
@@ -273,11 +389,16 @@ def main():
                 rz = (rlat - BASE_LAT) * SCALE
                 pts.append((rx, max(0.15, ralt / 5.0), rz))
             if len(pts) >= 2:
-                pts.append(pts[0])            # close the loop
-                route_ents.append(Entity(
-                    model=Mesh(vertices=pts, mode="line", thickness=2),
-                    color=color.rgba(0.35, 1.0, 0.45, 0.9),
-                    enabled=show["route"]))
+                pts.append(pts[0])  # close the loop
+                route_ents.append(
+                    Entity(
+                        model=Mesh(vertices=pts, mode="line", thickness=2),
+                        color=color.rgb(0.0, 1.0, 0.0),  # Neon green
+                        shader=None,
+                        unshaded=True,
+                        enabled=show["route"],
+                    )
+                )
 
     def refresh_panel():
         w = (7, 8, 8, 10, 11, 6, 5, 6, 5, 6, 7)
@@ -285,6 +406,7 @@ def main():
         for r in watch.rows():
             lines.append("  ".join(str(v).ljust(x) for v, x in zip(r, w)))
         pan_txt.text = "\n".join(lines[:14])
+
     cp_ents = {}
 
     def draw_checkpoints():
@@ -295,19 +417,29 @@ def main():
             z = (clat - BASE_LAT) * SCALE
             y = calt / 5.0
             if calt > 1.0:
-                col, label = color.orange, name              # air corridor
+                col, label = color.orange, name  # air corridor
             elif calt < -0.5:
                 col, label = color.violet, f"{name} ({calt:.0f}m)"  # submerged
                 y = 0.05
             else:
-                col, label = color.cyan, name                # surface
-            pin = Entity(model="cube", scale=(0.06, max(0.05, y), 0.06),
-                         position=(x, max(0.05, y) / 2, z),
-                         color=color.rgba(1, 1, 1, 0.35))
-            mark = Entity(model="sphere", scale=0.5, color=col,
-                          position=(x, max(0.25, y), z))
-            txt = Text(parent=mark, text=label, scale=18, y=1.2,
-                       color=color.white, billboard=True)
+                col, label = color.cyan, name  # surface
+            pin = Entity(
+                model="cube",
+                scale=(0.06, max(0.05, y), 0.06),
+                position=(x, max(0.05, y) / 2, z),
+                color=color.rgba(1, 1, 1, 0.35),
+            )
+            mark = Entity(
+                model="sphere", scale=0.5, color=col, position=(x, max(0.25, y), z)
+            )
+            txt = Text(
+                parent=mark,
+                text=label,
+                scale=18,
+                y=1.2,
+                color=color.white,
+                billboard=True,
+            )
             cp_ents[name] = (pin, mark, txt)
 
     def take_shot():
@@ -321,7 +453,8 @@ def main():
 
     def toggle_q():
         if rec.on:
-            print("[REC] stop recording before changing quality"); return
+            print("[REC] stop recording before changing quality")
+            return
         rec.hq = not rec.hq
         b_q.text = "HQ" if rec.hq else "LQ"
 
@@ -350,54 +483,177 @@ def main():
         b_pan.color = BTN_ON if show["panel"] else BTN_C
         pan_bg.enabled = pan_txt.enabled = show["panel"]
 
-    xs = [-0.36, -0.24, -0.12, 0.0, 0.12, 0.24, 0.36]
-    b_shot = Button(text="FOTO", scale=(0.10, 0.045), position=(xs[0], -0.43),
-                    color=BTN_C, on_click=take_shot)
-    b_rec = Button(text="REC", scale=(0.10, 0.045), position=(xs[1], -0.43),
-                   color=BTN_C, on_click=toggle_rec)
-    b_q = Button(text="HQ", scale=(0.10, 0.045), position=(xs[2], -0.43),
-                 color=BTN_C, on_click=toggle_q)
-    b_ids = Button(text="ID", scale=(0.10, 0.045), position=(xs[3], -0.43),
-                   color=BTN_C, on_click=toggle_ids)
-    b_route = Button(text="ROTA", scale=(0.10, 0.045), position=(xs[4], -0.43),
-                     color=BTN_C, on_click=toggle_route)
-    b_leg = Button(text="LEG", scale=(0.10, 0.045), position=(xs[5], -0.43),
-                   color=BTN_C, on_click=toggle_leg)
-    b_pan = Button(text="PANEL", scale=(0.10, 0.045), position=(xs[6], -0.43),
-                   color=BTN_C, on_click=toggle_panel)
+    def set_model_scale(domain, value):
+        model_scale[domain] = value
 
-    ents = {}      # aid -> dict(root, parts, alt_line, batt, domain)
+        for agent in ents.values():
+            if agent["dom"] == domain:
+                agent["root"].scale = value
+
+        for agent_id, reflection in reflections.items():
+            if ents[agent_id]["dom"] == domain:
+                reflection["root"].scale_x = value
+                reflection["root"].scale_z = value
+                reflection["root"].scale_y = -value
+
+    xs = [-0.36, -0.24, -0.12, 0.0, 0.12, 0.24, 0.36]
+    Button(
+        text="FOTO",
+        scale=(0.10, 0.045),
+        position=(xs[0], -0.43),
+        color=BTN_C,
+        on_click=take_shot,
+    )
+    b_rec = Button(
+        text="REC",
+        scale=(0.10, 0.045),
+        position=(xs[1], -0.43),
+        color=BTN_C,
+        on_click=toggle_rec,
+    )
+    b_q = Button(
+        text="HQ",
+        scale=(0.10, 0.045),
+        position=(xs[2], -0.43),
+        color=BTN_C,
+        on_click=toggle_q,
+    )
+    b_ids = Button(
+        text="ID",
+        scale=(0.10, 0.045),
+        position=(xs[3], -0.43),
+        color=BTN_C,
+        on_click=toggle_ids,
+    )
+    b_route = Button(
+        text="ROTA",
+        scale=(0.10, 0.045),
+        position=(xs[4], -0.43),
+        color=BTN_C,
+        on_click=toggle_route,
+    )
+    b_leg = Button(
+        text="LEG",
+        scale=(0.10, 0.045),
+        position=(xs[5], -0.43),
+        color=BTN_C,
+        on_click=toggle_leg,
+    )
+    b_pan = Button(
+        text="PANEL",
+        scale=(0.10, 0.045),
+        position=(xs[6], -0.43),
+        color=BTN_C,
+        on_click=toggle_panel,
+    )
+
+    Text("Drone size", position=(0.25, -0.34), scale=0.7)
+    aerial_scale_slider = Slider(
+        min=0.10,
+        max=0.60,
+        default=AERIAL_MODEL_SCALE,
+        step=0.01,
+        position=(0.25, -0.38),
+        on_value_changed=lambda: set_model_scale("aerial", aerial_scale_slider.value),
+    )
+
+    Text("Vessel size", position=(0.25, -0.27), scale=0.7)
+    surface_scale_slider = Slider(
+        min=0.10,
+        max=0.80,
+        default=SURFACE_MODEL_SCALE,
+        step=0.01,
+        position=(0.25, -0.31),
+        on_value_changed=lambda: set_model_scale("surface", surface_scale_slider.value),
+    )
+
+    ents = {}  # aid -> dict(root, parts, alt_line, batt, domain)
     trails, tick = {}, [0]
+    reflections = {}  # aid -> dict(root, parts)
     GRAY = color.rgb(0.45, 0.45, 0.45)
+    WATER_Y = -0.2
+    REFLECTION_COLOR = color.rgba(0.04, 0.16, 0.25, 0.32)
 
     def update():
         now = pytime.time()
+
+        # Update water animation
+        water.update(now)
+
         draw_checkpoints()
         with store.lock:
             snap = dict(store.state)
         for aid, (x, y, z, yaw, dom, vb, t_seen) in snap.items():
             if aid not in ents:
-                root, parts = build_aerial() if dom == "aerial" \
-                    else build_surface()
-                alt_line = Entity(model="cube",
-                                  color=color.rgba(1, 1, 1, 0.25),
-                                  scale=(0.05, 1, 0.05)) \
-                    if dom == "aerial" else None
-                batt = Entity(model="sphere", color=color.red,
-                              scale=0.25, enabled=False)
+                root, parts = build_aerial() if dom == "aerial" else build_surface()
+                root.scale = model_scale[dom]
+                alt_line = (
+                    Entity(
+                        model="cube",
+                        color=color.rgba(1, 1, 1, 0.25),
+                        scale=(0.05, 1, 0.05),
+                    )
+                    if dom == "aerial"
+                    else None
+                )
+                batt = Entity(
+                    model="sphere", color=color.red, scale=0.25, enabled=False
+                )
                 lbl_anchor = Entity(enabled=show["ids"])
-                Text(parent=lbl_anchor, text=aid, scale=12,
-                     billboard=True, color=color.white)
-                safe = Entity(model="sphere", enabled=False,
-                              scale=2 * SAFE_M / 5.0,
-                              color=color.rgba(1, 1, 1, 0.10))
-                ents[aid] = dict(root=root, parts=parts, alt=alt_line,
-                                 batt=batt, safe=safe, dom=dom,
-                                 lbl=lbl_anchor)
+                Text(
+                    parent=lbl_anchor,
+                    text=aid,
+                    scale=12,
+                    billboard=True,
+                    color=color.white,
+                    background=False,
+                    shader=None,
+                    unshaded=True,
+                )
+                safe = Entity(
+                    model="sphere",
+                    enabled=False,
+                    scale=2 * SAFE_M / 5.0,
+                    color=color.rgba(1, 1, 1, 0.10),
+                )
+                ents[aid] = dict(
+                    root=root,
+                    parts=parts,
+                    alt=alt_line,
+                    batt=batt,
+                    safe=safe,
+                    dom=dom,
+                    lbl=lbl_anchor,
+                )
+                # A dim, vertically mirrored duplicate gives agents a planar
+                # reflection without the cost of rendering the whole scene twice.
+                reflection_root, reflection_parts = (
+                    build_aerial() if dom == "aerial" else build_surface()
+                )
+                # reflection_root.scale_y = -1
+                selected_scale = model_scale[dom]
+                reflection_root.scale = (
+                    selected_scale,
+                    -selected_scale,
+                    selected_scale,
+                )
+                reflection_root.always_on_top = True
+                for reflection_part, _ in reflection_parts:
+                    reflection_part.color = REFLECTION_COLOR
+                    reflection_part.unshaded = True
+                    reflection_part.always_on_top = True
+                reflections[aid] = dict(root=reflection_root, parts=reflection_parts)
                 trails[aid] = []
             a = ents[aid]
-            a["root"].position = (x, max(0.3, y), z)
+            a["root"].position = (
+                x,
+                max(0.0, y),
+                z,
+            )  # Allow agents to reach water level
             a["root"].rotation_y = math.degrees(yaw)
+            reflection = reflections[aid]
+            reflection["root"].position = (x, 2 * WATER_Y - max(0.0, y), z)
+            reflection["root"].rotation_y = math.degrees(yaw)
             if a["alt"]:
                 a["alt"].position = (x, y / 2, z)
                 a["alt"].scale_y = max(0.01, y)
@@ -407,12 +663,17 @@ def main():
             low = (not stale) and vb < LOW_BATT_V
             a["batt"].enabled = low
             if low:
-                a["batt"].position = (x, max(0.3, y) + 1.5, z)
+                a["batt"].position = (x, max(0.0, y) + 1.5, z)
                 a["batt"].scale = 0.22 + 0.1 * math.sin(tick[0] * 0.35)
             if tick[0] % 4 == 0 and not stale:
-                trails[aid].append(Entity(model="sphere", scale=0.12,
-                                          color=color.light_gray,
-                                          position=a["root"].position))
+                trails[aid].append(
+                    Entity(
+                        model="sphere",
+                        scale=0.12,
+                        color=color.light_gray,
+                        position=a["root"].position,
+                    )
+                )
                 if len(trails[aid]) > TRAIL_LEN:
                     destroy(trails[aid].pop(0))
         # safety spheres: nearest same-domain neighbor distance (meters, 3D)
@@ -424,9 +685,9 @@ def main():
             for oid, (ox, oy, oz, _, odom, _, _) in snap.items():
                 if oid == aid or odom != dom:
                     continue
-                dmin = min(dmin, 5.0 * math.sqrt((ox - x) ** 2 +
-                                                 (oy - y) ** 2 +
-                                                 (oz - z) ** 2))
+                dmin = min(
+                    dmin, 5.0 * math.sqrt((ox - x) ** 2 + (oy - y) ** 2 + (oz - z) ** 2)
+                )
             s = a["safe"]
             if dmin > SHOW_M:
                 s.enabled = False
@@ -442,7 +703,7 @@ def main():
         for aid2, a2 in ents.items():
             if aid2 in snap:
                 x2, y2 = snap[aid2][0], snap[aid2][1]
-                a2["lbl"].position = (x2, max(0.3, y2) + 2.0, snap[aid2][2])
+                a2["lbl"].position = (x2, max(0.0, y2) + 2.0, snap[aid2][2])
         if routes_dirty[0]:
             routes_dirty[0] = False
             rebuild_routes()
@@ -450,8 +711,9 @@ def main():
             refresh_panel()
         tick[0] += 1
         fps = ClockObject.getGlobalClock().getAverageFrameRate()
-        hud.text = f"agents: {len(ents)}   FPS: {fps:.0f}" + \
-            (f"   REC {int(now - rec.t0)}s" if rec.on else "")
+        hud.text = f"agents: {len(ents)}   FPS: {fps:.0f}" + (
+            f"   REC {int(now - rec.t0)}s" if rec.on else ""
+        )
 
     def on_input(key):
         if key == "p":
